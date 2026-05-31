@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  lint:
+    name: rustfmt & clippy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install BLE build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
+      - name: rustfmt
+        id: fmt
+        run: cargo fmt --all --check
+      - name: clippy
+        id: clippy
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - name: Lint summary
+        if: always()
+        shell: bash
+        run: |
+          status() {
+            case "$1" in
+              success) echo "✅" ;;
+              failure) echo "❌" ;;
+              *) echo "$1" ;;
+            esac
+          }
+          {
+            echo "## Lint Results"
+            echo "| Check | Status |"
+            echo "|-------|--------|"
+            echo "| rustfmt | $(status ${{ steps.fmt.outcome }}) |"
+            echo "| clippy | $(status ${{ steps.clippy.outcome }}) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  test:
+    name: build & test (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
+          - { os: macos-15-intel, target: x86_64-apple-darwin }
+          - { os: macos-15, target: aarch64-apple-darwin }
+          - { os: windows-2025, target: x86_64-pc-windows-msvc, msvc_arch: amd64 }
+          - { os: windows-11-arm, target: aarch64-pc-windows-msvc, msvc_arch: arm64 }
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # mruby's Rake build invokes the MSVC compiler (cl.exe) directly, which is
+      # not on PATH by default on the Windows runners. Load the Visual C++
+      # developer environment so the native toolchain matches the Rust target.
+      - name: Set up MSVC developer environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.msvc_arch }}
+      - name: Install BLE build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
+      - name: Ruby version (required by the mruby build)
+        run: ruby --version
+      - name: Build
+        id: build
+        run: cargo build --locked --all-targets --verbose
+      - name: Test
+        id: test
+        run: cargo test --locked --verbose
+      - name: Test summary
+        if: always()
+        shell: bash
+        run: |
+          status() {
+            case "$1" in
+              success) echo "✅" ;;
+              failure) echo "❌" ;;
+              *) echo "$1" ;;
+            esac
+          }
+          {
+            echo "## Test Results (${{ matrix.target }})"
+            echo "| Step | Status |"
+            echo "|------|--------|"
+            echo "| build | $(status ${{ steps.build.outcome }}) |"
+            echo "| test | $(status ${{ steps.test.outcome }}) |"
+          } >> "$GITHUB_STEP_SUMMARY"
