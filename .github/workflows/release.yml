@@ -55,8 +55,8 @@ jobs:
           - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
           - { os: macos-15-intel, target: x86_64-apple-darwin }
           - { os: macos-15, target: aarch64-apple-darwin }
-          - { os: windows-2025, target: x86_64-pc-windows-msvc }
-          - { os: windows-11-arm, target: aarch64-pc-windows-msvc }
+          - { os: windows-2025, target: x86_64-pc-windows-msvc, msvc_arch: amd64 }
+          - { os: windows-11-arm, target: aarch64-pc-windows-msvc, msvc_arch: arm64 }
     steps:
       - uses: actions/checkout@v6
         with:
@@ -65,6 +65,14 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
+      # mruby's Rake build invokes the MSVC compiler (cl.exe) directly, which is
+      # not on PATH by default on the Windows runners. Load the Visual C++
+      # developer environment so the native toolchain matches the Rust target.
+      - name: Set up MSVC developer environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.msvc_arch }}
       - name: Install BLE build dependencies (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
