@@ -203,7 +203,13 @@ async fn connect_with_retry(peripheral: &Peripheral) -> Result<()> {
         match tokio::time::timeout(CONNECT_TIMEOUT, peripheral.connect()).await {
             Ok(Ok(())) => return Ok(()),
             Ok(Err(e)) => last_err = anyhow!(e).context("failed to connect to the device"),
-            Err(_) => last_err = anyhow!("timed out after {CONNECT_TIMEOUT:?} while connecting"),
+            Err(_) => {
+                // Dropping a timed-out connect() future may leave the OS BLE
+                // stack with a pending connection attempt; cancel it explicitly
+                // so the next attempt starts from a clean state.
+                let _ = peripheral.disconnect().await;
+                last_err = anyhow!("timed out after {CONNECT_TIMEOUT:?} while connecting");
+            }
         }
         if attempt < CONNECT_ATTEMPTS {
             tracing::warn!(
