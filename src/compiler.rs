@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: Copyright (c) 2025-2026 OpenBlink All Rights Reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
+//! Rust FFI wrapper around the statically linked mruby compiler shim.
+
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 
 use thiserror::Error;

@@ -7,7 +7,36 @@
 //! Ported from `openblink-webide` (`public_html/js/config.js` and
 //! `public_html/js/ble-protocol.js`).
 
+use std::fmt;
+
+use clap::ValueEnum;
 use uuid::{uuid, Uuid};
+
+/// Program slot on the device. The protocol only defines slots 1 and 2, so
+/// invalid values are rejected at argument-parsing time instead of at runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum Slot {
+    #[value(name = "1")]
+    One,
+    #[value(name = "2")]
+    Two,
+}
+
+impl Slot {
+    /// The slot number as sent on the wire.
+    pub fn number(self) -> u8 {
+        match self {
+            Slot::One => 1,
+            Slot::Two => 2,
+        }
+    }
+}
+
+impl fmt::Display for Slot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.number())
+    }
+}
 
 /// Primary GATT service exposed by OpenBlink devices.
 pub const SERVICE_UUID: Uuid = uuid!("227da52c-e13a-412b-befb-ba2256bb7fbe");
@@ -52,13 +81,13 @@ pub fn build_data_chunk(offset: u16, payload: &[u8]) -> Vec<u8> {
 }
 
 /// Builds a Program (`P`) command with the total length, CRC16 and target slot.
-pub fn build_program_command(length: u16, crc16: u16, slot: u8) -> Vec<u8> {
+pub fn build_program_command(length: u16, crc16: u16, slot: Slot) -> Vec<u8> {
     let mut buf = Vec::with_capacity(PROGRAM_HEADER_SIZE);
     buf.push(PROTOCOL_VERSION);
     buf.push(CMD_PROGRAM);
     buf.extend_from_slice(&length.to_le_bytes());
     buf.extend_from_slice(&crc16.to_le_bytes());
-    buf.push(slot);
+    buf.push(slot.number());
     buf.push(0x00);
     buf
 }
@@ -70,10 +99,28 @@ pub fn build_reload_command() -> Vec<u8> {
 
 /// Builds a Reset (`R`) command. With `slot`, resets that slot; without it,
 /// the device performs a full reboot.
-pub fn build_reset_command(slot: Option<u8>) -> Vec<u8> {
+pub fn build_reset_command(slot: Option<Slot>) -> Vec<u8> {
     match slot {
-        Some(s) => vec![PROTOCOL_VERSION, CMD_RESET, s],
+        Some(s) => vec![PROTOCOL_VERSION, CMD_RESET, s.number()],
         None => vec![PROTOCOL_VERSION, CMD_RESET],
+    }
+}
+
+/// Status reported by the device on the Program characteristic after a
+/// transfer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Status {
+    Ok(String),
+    Error(String),
+}
+
+/// Parses a Program characteristic status notification payload.
+pub fn parse_status(value: &[u8]) -> Status {
+    let msg = String::from_utf8_lossy(value).trim().to_string();
+    if msg.starts_with("ERROR") {
+        Status::Error(msg)
+    } else {
+        Status::Ok(msg)
     }
 }
 
@@ -93,7 +140,7 @@ mod tests {
 
     #[test]
     fn program_command_layout() {
-        let cmd = build_program_command(0x1234, 0x97DE, 2);
+        let cmd = build_program_command(0x1234, 0x97DE, Slot::Two);
         assert_eq!(cmd.len(), PROGRAM_HEADER_SIZE);
         assert_eq!(cmd[0], 0x01);
         assert_eq!(cmd[1], b'P');
@@ -104,9 +151,18 @@ mod tests {
     }
 
     #[test]
+    fn status_parsing() {
+        assert_eq!(parse_status(b"OK\r\n"), Status::Ok("OK".to_string()));
+        assert_eq!(
+            parse_status(b"ERROR crc mismatch"),
+            Status::Error("ERROR crc mismatch".to_string())
+        );
+    }
+
+    #[test]
     fn reload_and_reset_commands() {
         assert_eq!(build_reload_command(), vec![0x01, b'L']);
         assert_eq!(build_reset_command(None), vec![0x01, b'R']);
-        assert_eq!(build_reset_command(Some(1)), vec![0x01, b'R', 1]);
+        assert_eq!(build_reset_command(Some(Slot::One)), vec![0x01, b'R', 1]);
     }
 }

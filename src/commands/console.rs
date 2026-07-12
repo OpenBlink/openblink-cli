@@ -1,35 +1,19 @@
+// SPDX-FileCopyrightText: Copyright (c) 2025-2026 OpenBlink All Rights Reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
+//! Streams device console output over BLE until Ctrl-C.
+
 use std::io::Write;
 use std::time::Duration;
 
 use anyhow::{bail, Result};
 use futures::StreamExt;
-use indicatif::ProgressBar;
 
 use crate::ble::{manager, protocol};
+use crate::commands::common;
 
 pub async fn run(device: Option<&str>, timeout: Duration) -> Result<()> {
-    let adapter = manager::first_adapter().await?;
-
-    let spinner = ProgressBar::new_spinner();
-    spinner.set_message("Searching for device...");
-    spinner.enable_steady_tick(Duration::from_millis(100));
-
-    let peripheral = match manager::find_device(&adapter, timeout, device).await {
-        Ok(p) => p,
-        Err(e) => {
-            spinner.finish_and_clear();
-            return Err(e);
-        }
-    };
-    let conn = match manager::Connection::open(peripheral).await {
-        Ok(c) => c,
-        Err(e) => {
-            spinner.finish_and_clear();
-            return Err(e);
-        }
-    };
-    spinner.finish_and_clear();
-
+    let conn = common::connect(device, timeout).await?;
     let result = stream_console(&conn).await;
     conn.disconnect().await;
     result

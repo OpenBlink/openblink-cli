@@ -11,10 +11,10 @@ use indicatif::{ProgressBar, ProgressStyle};
 
 use super::crc::crc16;
 use super::manager::Connection;
-use super::protocol::{self, MAX_PROGRAM_SIZE};
+use super::protocol::{self, Slot, MAX_PROGRAM_SIZE};
 
 /// Validates a program against the protocol constraints before transfer.
-pub fn validate_program(bytecode: &[u8], slot: u8, mtu: usize) -> Result<()> {
+pub fn validate_program(bytecode: &[u8], mtu: usize) -> Result<()> {
     if bytecode.is_empty() {
         return Err(anyhow!("program is empty (0 bytes)"));
     }
@@ -23,9 +23,6 @@ pub fn validate_program(bytecode: &[u8], slot: u8, mtu: usize) -> Result<()> {
             "program exceeds {MAX_PROGRAM_SIZE} bytes (got {})",
             bytecode.len()
         ));
-    }
-    if slot != 1 && slot != 2 {
-        return Err(anyhow!("slot must be 1 or 2 (got {slot})"));
     }
     if mtu <= protocol::DATA_HEADER_SIZE {
         return Err(anyhow!(
@@ -37,8 +34,8 @@ pub fn validate_program(bytecode: &[u8], slot: u8, mtu: usize) -> Result<()> {
 }
 
 /// Transfers `bytecode` to the device and issues the reLoad command.
-pub async fn transfer(conn: &Connection, bytecode: &[u8], slot: u8) -> Result<()> {
-    validate_program(bytecode, slot, conn.mtu)?;
+pub async fn transfer(conn: &Connection, bytecode: &[u8], slot: Slot) -> Result<()> {
+    validate_program(bytecode, conn.mtu)?;
 
     let payload_size = conn.payload_size();
     let total = bytecode.len();
@@ -76,9 +73,8 @@ mod tests {
 
     #[test]
     fn validation_rules() {
-        assert!(validate_program(b"", 1, 20).is_err()); // empty
-        assert!(validate_program(b"abc", 3, 20).is_err()); // slot
-        assert!(validate_program(b"abc", 1, 6).is_err()); // mtu too small
-        assert!(validate_program(b"abc", 1, 20).is_ok());
+        assert!(validate_program(b"", 20).is_err()); // empty
+        assert!(validate_program(b"abc", 6).is_err()); // mtu too small
+        assert!(validate_program(b"abc", 20).is_ok());
     }
 }

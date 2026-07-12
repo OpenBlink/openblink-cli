@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright (c) 2025-2026 OpenBlink All Rights Reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
 //! CRC16 used by the OpenBlink Program command.
 //!
 //! The device computes a reflected CRC16 with polynomial `0xD175` and seed

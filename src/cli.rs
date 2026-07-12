@@ -1,6 +1,13 @@
+// SPDX-FileCopyrightText: Copyright (c) 2025-2026 OpenBlink All Rights Reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
+//! Command-line argument and subcommand definitions.
+
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
+
+use crate::ble::protocol::Slot;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -33,9 +40,9 @@ pub enum Command {
         /// Target device name or address (defaults to the first OpenBlink found).
         #[arg(long)]
         device: Option<String>,
-        /// Program slot to write (1 or 2).
-        #[arg(long, default_value_t = 1)]
-        slot: u8,
+        /// Program slot to write.
+        #[arg(long, default_value_t = Slot::One)]
+        slot: Slot,
     },
 
     /// Compile a Ruby file to .mrb without using BLE.
@@ -61,7 +68,7 @@ pub enum Command {
         device: Option<String>,
         /// Optional slot to reset.
         #[arg(long)]
-        slot: Option<u8>,
+        slot: Option<Slot>,
     },
 
     /// Send a reLoad (L) command to the device.

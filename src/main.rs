@@ -1,8 +1,12 @@
+// SPDX-FileCopyrightText: Copyright (c) 2025-2026 OpenBlink All Rights Reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
 mod ble;
 mod cli;
 mod commands;
 mod compiler;
 
+use std::future::Future;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -27,30 +31,33 @@ fn main() -> Result<()> {
 
     init_tracing(cli.verbose);
 
+    let timeout = Duration::from_secs(cli.timeout);
     match cli.command {
         // `compile` does not need BLE or an async runtime.
         Command::Compile { file, output } => commands::compile::run(&file, output.as_deref()),
         // All other commands talk to the device over BLE.
-        other => {
-            let runtime = tokio::runtime::Runtime::new()?;
-            runtime.block_on(run_ble(other, Duration::from_secs(cli.timeout)))
+        Command::Scan => block_on_ble(commands::scan::run(timeout)),
+        Command::Blink { file, device, slot } => block_on_ble(commands::blink::run(
+            &file,
+            device.as_deref(),
+            slot,
+            timeout,
+        )),
+        Command::Console { device } => {
+            block_on_ble(commands::console::run(device.as_deref(), timeout))
+        }
+        Command::Reset { device, slot } => {
+            block_on_ble(commands::reset::run(device.as_deref(), slot, timeout))
+        }
+        Command::Reload { device } => {
+            block_on_ble(commands::reload::run(device.as_deref(), timeout))
         }
     }
 }
 
-async fn run_ble(command: Command, timeout: Duration) -> Result<()> {
-    match command {
-        Command::Scan => commands::scan::run(timeout).await,
-        Command::Blink { file, device, slot } => {
-            commands::blink::run(&file, device.as_deref(), slot, timeout).await
-        }
-        Command::Console { device } => commands::console::run(device.as_deref(), timeout).await,
-        Command::Reset { device, slot } => {
-            commands::reset::run(device.as_deref(), slot, timeout).await
-        }
-        Command::Reload { device } => commands::reload::run(device.as_deref(), timeout).await,
-        Command::Compile { .. } => unreachable!("compile is handled synchronously"),
-    }
+/// Runs a BLE command future on a fresh Tokio runtime.
+fn block_on_ble<F: Future<Output = Result<()>>>(fut: F) -> Result<()> {
+    tokio::runtime::Runtime::new()?.block_on(fut)
 }
 
 fn init_tracing(verbose: u8) {

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright (c) 2025-2026 OpenBlink All Rights Reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
 //! Release-gate test: verifies that the bundled mruby compiler (`mrbc`) emits
 //! the exact RITE bytecode we expect.
 //!

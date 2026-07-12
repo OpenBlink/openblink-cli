@@ -1,15 +1,21 @@
+// SPDX-FileCopyrightText: Copyright (c) 2025-2026 OpenBlink All Rights Reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
+//! The Build & Blink command: compile, transfer and reLoad in one step.
+
 use std::fs;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 use futures::StreamExt;
-use indicatif::ProgressBar;
 
-use crate::ble::{manager, protocol, transfer};
+use crate::ble::protocol::{self, Slot, Status};
+use crate::ble::{manager, transfer};
+use crate::commands::common;
 use crate::compiler;
 
-pub async fn run(file: &Path, device: Option<&str>, slot: u8, timeout: Duration) -> Result<()> {
+pub async fn run(file: &Path, device: Option<&str>, slot: Slot, timeout: Duration) -> Result<()> {
     // 1. Compile the Ruby source to bytecode.
     let source =
         fs::read_to_string(file).with_context(|| format!("failed to read {}", file.display()))?;
@@ -24,27 +30,7 @@ pub async fn run(file: &Path, device: Option<&str>, slot: u8, timeout: Duration)
     );
 
     // 2. Discover and connect to the device.
-    let adapter = manager::first_adapter().await?;
-    let spinner = ProgressBar::new_spinner();
-    spinner.set_message("Searching for device...");
-    spinner.enable_steady_tick(Duration::from_millis(100));
-
-    let peripheral = match manager::find_device(&adapter, timeout, device).await {
-        Ok(p) => p,
-        Err(e) => {
-            spinner.finish_and_clear();
-            return Err(e);
-        }
-    };
-    spinner.set_message("Connecting...");
-    let conn = match manager::Connection::open(peripheral).await {
-        Ok(c) => c,
-        Err(e) => {
-            spinner.finish_and_clear();
-            return Err(e);
-        }
-    };
-    spinner.finish_and_clear();
+    let conn = common::connect(device, timeout).await?;
 
     // 3. Transfer and wait for the status, always disconnecting afterwards —
     //    including on error and on Ctrl-C, so the device is not left holding a
@@ -59,7 +45,7 @@ pub async fn run(file: &Path, device: Option<&str>, slot: u8, timeout: Duration)
 
 /// Transfers the bytecode over an established connection and reports the
 /// device status.
-async fn blink_connected(conn: &manager::Connection, bytecode: &[u8], slot: u8) -> Result<()> {
+async fn blink_connected(conn: &manager::Connection, bytecode: &[u8], slot: Slot) -> Result<()> {
     let program_notifies = conn.subscribe_program().await?;
     // Open the notification stream before transferring so a status
     // notification arriving immediately after the reLoad is not missed.
@@ -80,7 +66,7 @@ async fn blink_connected(conn: &manager::Connection, bytecode: &[u8], slot: u8) 
         Some(notifications) => tokio::time::timeout(Duration::from_secs(3), async {
             while let Some(n) = notifications.next().await {
                 if n.uuid == protocol::PROGRAM_CHAR_UUID {
-                    return Some(String::from_utf8_lossy(&n.value).trim().to_string());
+                    return Some(protocol::parse_status(&n.value));
                 }
             }
             None
@@ -92,8 +78,8 @@ async fn blink_connected(conn: &manager::Connection, bytecode: &[u8], slot: u8) 
     };
 
     match status {
-        Some(msg) if msg.starts_with("ERROR") => bail!("device reported: {msg}"),
-        Some(msg) => println!("Transferred and loaded in {transfer_ms} ms ({msg})"),
+        Some(Status::Error(msg)) => bail!("device reported: {msg}"),
+        Some(Status::Ok(msg)) => println!("Transferred and loaded in {transfer_ms} ms ({msg})"),
         None => println!("Transferred and loaded in {transfer_ms} ms"),
     }
     Ok(())
