@@ -5,14 +5,17 @@ use indicatif::ProgressBar;
 
 use crate::ble::manager;
 
-pub async fn run(timeout: u64) -> Result<()> {
+pub async fn run(timeout: Duration) -> Result<()> {
     let adapter = manager::first_adapter().await?;
 
     let spinner = ProgressBar::new_spinner();
-    spinner.set_message(format!("Scanning for OpenBlink devices ({timeout}s)..."));
+    spinner.set_message(format!(
+        "Scanning for OpenBlink devices ({}s)...",
+        timeout.as_secs()
+    ));
     spinner.enable_steady_tick(Duration::from_millis(100));
 
-    let devices = manager::scan(&adapter, Duration::from_secs(timeout)).await?;
+    let devices = manager::scan(&adapter, timeout).await?;
     spinner.finish_and_clear();
 
     if devices.is_empty() {

@@ -104,6 +104,10 @@ openblink console
 openblink scan [--timeout <seconds>]   # default: 10
 ```
 
+Scans for the full timeout and lists every OpenBlink device found. All other
+BLE commands stop scanning as soon as the target device is discovered, so they
+usually connect in well under a second.
+
 ### `blink`
 
 ```sh
@@ -144,6 +148,8 @@ connection alive.
 
 - `--device <name|address>` — select a device by name substring or address.
   When omitted, the first discovered OpenBlink device is used.
+- `--timeout <seconds>` — maximum time to scan for devices (default: 10).
+  Commands other than `scan` return as soon as the target device is found.
 - `-v`, `-vv`, `-vvv` — increase logging verbosity (info, debug, trace).
 - `--version` — print the CLI version and the bundled mruby (`mrbc`) version.
 - `--help` — print help for the CLI or a subcommand.

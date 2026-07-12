@@ -9,7 +9,7 @@ use indicatif::ProgressBar;
 use crate::ble::{manager, protocol, transfer};
 use crate::compiler;
 
-pub async fn run(file: &Path, device: Option<&str>, slot: u8) -> Result<()> {
+pub async fn run(file: &Path, device: Option<&str>, slot: u8, timeout: Duration) -> Result<()> {
     // 1. Compile the Ruby source to bytecode.
     let source =
         fs::read_to_string(file).with_context(|| format!("failed to read {}", file.display()))?;
@@ -29,7 +29,7 @@ pub async fn run(file: &Path, device: Option<&str>, slot: u8) -> Result<()> {
     spinner.set_message("Searching for device...");
     spinner.enable_steady_tick(Duration::from_millis(100));
 
-    let peripheral = manager::find_device(&adapter, Duration::from_secs(10), device).await?;
+    let peripheral = manager::find_device(&adapter, timeout, device).await?;
     spinner.set_message("Connecting...");
     let conn = manager::Connection::open(peripheral).await?;
     let program_notifies = conn.subscribe_program().await?;
