@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use futures::StreamExt;
 use indicatif::ProgressBar;
 
@@ -29,23 +29,55 @@ pub async fn run(file: &Path, device: Option<&str>, slot: u8, timeout: Duration)
     spinner.set_message("Searching for device...");
     spinner.enable_steady_tick(Duration::from_millis(100));
 
-    let peripheral = manager::find_device(&adapter, timeout, device).await?;
+    let peripheral = match manager::find_device(&adapter, timeout, device).await {
+        Ok(p) => p,
+        Err(e) => {
+            spinner.finish_and_clear();
+            return Err(e);
+        }
+    };
     spinner.set_message("Connecting...");
-    let conn = manager::Connection::open(peripheral).await?;
-    let program_notifies = conn.subscribe_program().await?;
+    let conn = match manager::Connection::open(peripheral).await {
+        Ok(c) => c,
+        Err(e) => {
+            spinner.finish_and_clear();
+            return Err(e);
+        }
+    };
     spinner.finish_and_clear();
 
-    // 3. Transfer the bytecode and reLoad.
+    // 3. Transfer and wait for the status, always disconnecting afterwards —
+    //    including on error and on Ctrl-C, so the device is not left holding a
+    //    dangling connection that blocks later commands.
+    let result = tokio::select! {
+        r = blink_connected(&conn, &bytecode, slot) => r,
+        _ = tokio::signal::ctrl_c() => Err(anyhow!("interrupted")),
+    };
+    conn.disconnect().await;
+    result
+}
+
+/// Transfers the bytecode over an established connection and reports the
+/// device status.
+async fn blink_connected(conn: &manager::Connection, bytecode: &[u8], slot: u8) -> Result<()> {
+    let program_notifies = conn.subscribe_program().await?;
+    // Open the notification stream before transferring so a status
+    // notification arriving immediately after the reLoad is not missed.
+    let mut notifications = if program_notifies {
+        Some(conn.notifications().await?)
+    } else {
+        None
+    };
+
     let t1 = Instant::now();
-    transfer::transfer(&conn, &bytecode, slot).await?;
+    transfer::transfer(conn, bytecode, slot).await?;
     let transfer_ms = t1.elapsed().as_millis();
 
-    // 4. Wait briefly for the device's status notification, but only when the
-    //    Program characteristic actually sends one. Some firmware exposes it
-    //    as write-only, in which case there is no status to wait for.
-    let status = if program_notifies {
-        let mut notifications = conn.notifications().await?;
-        tokio::time::timeout(Duration::from_secs(3), async {
+    // Wait briefly for the device's status notification, but only when the
+    // Program characteristic actually sends one. Some firmware exposes it
+    // as write-only, in which case there is no status to wait for.
+    let status = match notifications.as_mut() {
+        Some(notifications) => tokio::time::timeout(Duration::from_secs(3), async {
             while let Some(n) = notifications.next().await {
                 if n.uuid == protocol::PROGRAM_CHAR_UUID {
                     return Some(String::from_utf8_lossy(&n.value).trim().to_string());
@@ -55,12 +87,9 @@ pub async fn run(file: &Path, device: Option<&str>, slot: u8, timeout: Duration)
         })
         .await
         .ok()
-        .flatten()
-    } else {
-        None
+        .flatten(),
+        None => None,
     };
-
-    conn.disconnect().await;
 
     match status {
         Some(msg) if msg.starts_with("ERROR") => bail!("device reported: {msg}"),

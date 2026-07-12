@@ -1,7 +1,7 @@
 use std::io::Write;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use futures::StreamExt;
 use indicatif::ProgressBar;
 
@@ -14,11 +14,30 @@ pub async fn run(device: Option<&str>, timeout: Duration) -> Result<()> {
     spinner.set_message("Searching for device...");
     spinner.enable_steady_tick(Duration::from_millis(100));
 
-    let peripheral = manager::find_device(&adapter, timeout, device).await?;
-    let conn = manager::Connection::open(peripheral).await?;
+    let peripheral = match manager::find_device(&adapter, timeout, device).await {
+        Ok(p) => p,
+        Err(e) => {
+            spinner.finish_and_clear();
+            return Err(e);
+        }
+    };
+    let conn = match manager::Connection::open(peripheral).await {
+        Ok(c) => c,
+        Err(e) => {
+            spinner.finish_and_clear();
+            return Err(e);
+        }
+    };
+    spinner.finish_and_clear();
+
+    let result = stream_console(&conn).await;
+    conn.disconnect().await;
+    result
+}
+
+async fn stream_console(conn: &manager::Connection) -> Result<()> {
     conn.subscribe_console().await?;
     let mut notifications = conn.notifications().await?;
-    spinner.finish_and_clear();
 
     println!("Connected. Streaming console output (press Ctrl-C to stop)...");
 
@@ -26,7 +45,7 @@ pub async fn run(device: Option<&str>, timeout: Duration) -> Result<()> {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {
                 println!("\nStopping.");
-                break;
+                return Ok(());
             }
             item = notifications.next() => {
                 match item {
@@ -35,12 +54,9 @@ pub async fn run(device: Option<&str>, timeout: Duration) -> Result<()> {
                         let _ = std::io::stdout().flush();
                     }
                     Some(_) => {}
-                    None => break,
+                    None => bail!("device disconnected"),
                 }
             }
         }
     }
-
-    conn.disconnect().await;
-    Ok(())
 }

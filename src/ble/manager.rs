@@ -28,6 +28,11 @@ use super::protocol;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 /// Maximum time to wait for a notification subscription to be confirmed.
 const SUBSCRIBE_TIMEOUT: Duration = Duration::from_secs(5);
+/// Number of connection attempts before giving up. BLE connections routinely
+/// fail transiently (radio contention, slow advertising intervals).
+const CONNECT_ATTEMPTS: u32 = 3;
+/// Delay between connection attempts.
+const CONNECT_RETRY_DELAY: Duration = Duration::from_millis(500);
 
 /// Human-readable summary of a discovered peripheral.
 pub struct DiscoveredDevice {
@@ -185,19 +190,47 @@ pub struct Connection {
     pub mtu: usize,
 }
 
-impl Connection {
-    /// Connects, discovers characteristics and negotiates the MTU.
-    pub async fn open(peripheral: Peripheral) -> Result<Self> {
-        // Connect unless the peripheral is already connected to this session.
-        // The timeout prevents a stuck connect() — e.g. when the device is held
-        // by another central and the connection never completes — from blocking
-        // forever.
-        if !peripheral.is_connected().await.unwrap_or(false) {
-            tokio::time::timeout(CONNECT_TIMEOUT, peripheral.connect())
-                .await
-                .map_err(|_| anyhow!("timed out after {CONNECT_TIMEOUT:?} while connecting"))?
-                .context("failed to connect to the device")?;
+/// Connects to the peripheral, retrying on transient failures. Skipped when
+/// the peripheral is already connected to this session. The per-attempt
+/// timeout prevents a stuck `connect()` — e.g. when the device is held by
+/// another central and the connection never completes — from blocking forever.
+async fn connect_with_retry(peripheral: &Peripheral) -> Result<()> {
+    if peripheral.is_connected().await.unwrap_or(false) {
+        return Ok(());
+    }
+    let mut last_err = anyhow!("no connection attempt was made");
+    for attempt in 1..=CONNECT_ATTEMPTS {
+        match tokio::time::timeout(CONNECT_TIMEOUT, peripheral.connect()).await {
+            Ok(Ok(())) => return Ok(()),
+            Ok(Err(e)) => last_err = anyhow!(e).context("failed to connect to the device"),
+            Err(_) => last_err = anyhow!("timed out after {CONNECT_TIMEOUT:?} while connecting"),
         }
+        if attempt < CONNECT_ATTEMPTS {
+            tracing::warn!(
+                "connect attempt {attempt}/{CONNECT_ATTEMPTS} failed ({last_err:#}), retrying"
+            );
+            sleep(CONNECT_RETRY_DELAY).await;
+        }
+    }
+    Err(last_err)
+}
+
+impl Connection {
+    /// Connects, discovers characteristics and negotiates the MTU. On failure
+    /// after the link was established, the peripheral is disconnected so the
+    /// device is not left holding a dead connection.
+    pub async fn open(peripheral: Peripheral) -> Result<Self> {
+        connect_with_retry(&peripheral).await?;
+        match Self::setup(&peripheral).await {
+            Ok(conn) => Ok(conn),
+            Err(e) => {
+                let _ = peripheral.disconnect().await;
+                Err(e)
+            }
+        }
+    }
+
+    async fn setup(peripheral: &Peripheral) -> Result<Self> {
         peripheral
             .discover_services()
             .await
@@ -212,10 +245,10 @@ impl Connection {
             .ok_or_else(|| anyhow!("console characteristic not found on device"))?;
         let mtu_char = find(protocol::MTU_CHAR_UUID);
 
-        let mtu = negotiate_mtu(&peripheral, mtu_char.as_ref()).await;
+        let mtu = negotiate_mtu(peripheral, mtu_char.as_ref()).await;
 
         Ok(Self {
-            peripheral,
+            peripheral: peripheral.clone(),
             program,
             console,
             mtu,

@@ -14,9 +14,11 @@ pub async fn run(device: Option<&str>, slot: Option<u8>, timeout: Duration) -> R
     let adapter = manager::first_adapter().await?;
     let peripheral = manager::find_device(&adapter, timeout, device).await?;
     let conn = manager::Connection::open(peripheral).await?;
-    conn.write_program(&protocol::build_reset_command(slot))
-        .await?;
+    let result = conn
+        .write_program(&protocol::build_reset_command(slot))
+        .await;
     conn.disconnect().await;
+    result?;
 
     match slot {
         Some(s) => println!("Sent reset for slot {s}."),
