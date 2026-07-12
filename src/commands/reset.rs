@@ -5,16 +5,18 @@
 
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use crate::ble::protocol::{self, Slot};
 use crate::commands::common;
 
 pub async fn run(device: Option<&str>, slot: Option<Slot>, timeout: Duration) -> Result<()> {
     let conn = common::connect(device, timeout).await?;
-    let result = conn
-        .write_program(&protocol::build_reset_command(slot))
-        .await;
+    let command = protocol::build_reset_command(slot);
+    let result = tokio::select! {
+        r = conn.write_program(&command) => r,
+        _ = tokio::signal::ctrl_c() => Err(anyhow!("interrupted")),
+    };
     conn.disconnect().await;
     result?;
 
