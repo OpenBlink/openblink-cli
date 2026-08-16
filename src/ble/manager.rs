@@ -13,11 +13,12 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use btleplug::api::{
-    Central, CharPropFlags, Characteristic, Manager as _, Peripheral as _, ScanFilter,
-    ValueNotification, WriteType,
+    Central, CentralEvent, CharPropFlags, Characteristic, Manager as _, Peripheral as _,
+    ScanFilter, ValueNotification, WriteType,
 };
 use btleplug::platform::{Adapter, Manager, Peripheral};
-use futures::stream::Stream;
+use futures::future::join_all;
+use futures::stream::{Stream, StreamExt};
 use tokio::time::sleep;
 use uuid::Uuid;
 
@@ -79,13 +80,14 @@ pub async fn scan(adapter: &Adapter, timeout: Duration) -> Result<Vec<Peripheral
         .context("failed to read scan results")?;
     let _ = adapter.stop_scan().await;
 
-    let mut matches = Vec::new();
-    for p in peripherals {
+    let checks = peripherals.into_iter().map(|p| async move {
         if is_openblink(&p).await {
-            matches.push(p);
+            Some(p)
+        } else {
+            None
         }
-    }
-    Ok(matches)
+    });
+    Ok(join_all(checks).await.into_iter().flatten().collect())
 }
 
 /// Reads a human-readable description of a peripheral.
@@ -98,35 +100,79 @@ pub async fn describe(peripheral: &Peripheral) -> DiscoveredDevice {
     }
 }
 
-/// Scans and selects a device. When `selector` is `None`, the first OpenBlink
-/// device is returned; otherwise the name (substring) or address is matched.
+/// Returns whether a device identified by `name`/`address` matches `selector`.
+/// `None` matches any device; otherwise the name (substring) or the address
+/// (case-insensitive) must match.
+fn matches_selector(name: Option<&str>, address: &str, selector: Option<&str>) -> bool {
+    match selector {
+        None => true,
+        Some(sel) => {
+            name.map(|n| n.contains(sel)).unwrap_or(false) || address.eq_ignore_ascii_case(sel)
+        }
+    }
+}
+
+async fn candidate_matches(peripheral: &Peripheral, selector: Option<&str>) -> bool {
+    if !is_openblink(peripheral).await {
+        return false;
+    }
+    let info = describe(peripheral).await;
+    matches_selector(info.name.as_deref(), &info.address, selector)
+}
+
+/// Scans and selects a device, returning as soon as a match is discovered
+/// instead of waiting out the full scan window. When `selector` is `None`, the
+/// first OpenBlink device is returned; otherwise the name (substring) or
+/// address is matched. `timeout` bounds the total discovery time.
 pub async fn find_device(
     adapter: &Adapter,
     timeout: Duration,
     selector: Option<&str>,
 ) -> Result<Peripheral> {
-    let devices = scan(adapter, timeout).await?;
-    if devices.is_empty() {
-        return Err(anyhow!("no OpenBlink devices found"));
-    }
+    // Subscribe to adapter events before scanning so no discovery is missed.
+    let mut events = adapter
+        .events()
+        .await
+        .context("failed to open the BLE event stream")?;
+    adapter
+        .start_scan(ScanFilter {
+            services: vec![protocol::SERVICE_UUID],
+        })
+        .await
+        .context("failed to start BLE scan")?;
 
-    match selector {
-        None => Ok(devices.into_iter().next().expect("non-empty")),
-        Some(sel) => {
-            for p in &devices {
-                let info = describe(p).await;
-                let name_match = info
-                    .name
-                    .as_deref()
-                    .map(|n| n.contains(sel))
-                    .unwrap_or(false);
-                let addr_match = info.address.eq_ignore_ascii_case(sel);
-                if name_match || addr_match {
-                    return Ok(p.clone());
+    let result = tokio::time::timeout(timeout, async {
+        // Devices already known to the adapter never re-emit DeviceDiscovered.
+        if let Ok(known) = adapter.peripherals().await {
+            for p in known {
+                if candidate_matches(&p, selector).await {
+                    return Ok(p);
                 }
             }
-            Err(anyhow!("no connected OpenBlink device matched '{sel}'"))
         }
+        while let Some(event) = events.next().await {
+            let id = match event {
+                CentralEvent::DeviceDiscovered(id) | CentralEvent::DeviceUpdated(id) => id,
+                CentralEvent::ServicesAdvertisement { id, .. } => id,
+                _ => continue,
+            };
+            if let Ok(p) = adapter.peripheral(&id).await {
+                if candidate_matches(&p, selector).await {
+                    return Ok(p);
+                }
+            }
+        }
+        Err(anyhow!("the BLE event stream ended unexpectedly"))
+    })
+    .await;
+    let _ = adapter.stop_scan().await;
+
+    match result {
+        Ok(found) => found,
+        Err(_) => Err(match selector {
+            Some(sel) => anyhow!("no OpenBlink device matched '{sel}' within {timeout:?}"),
+            None => anyhow!("no OpenBlink devices found within {timeout:?}"),
+        }),
     }
 }
 
@@ -268,4 +314,48 @@ async fn negotiate_mtu(peripheral: &Peripheral, mtu_char: Option<&Characteristic
         }
     }
     protocol::DEFAULT_MTU
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selector_none_matches_any_device() {
+        assert!(matches_selector(None, "AA:BB:CC:DD:EE:FF", None));
+        assert!(matches_selector(
+            Some("OpenBlink"),
+            "AA:BB:CC:DD:EE:FF",
+            None
+        ));
+    }
+
+    #[test]
+    fn selector_matches_name_substring() {
+        assert!(matches_selector(
+            Some("OpenBlink-1234"),
+            "AA:BB:CC:DD:EE:FF",
+            Some("Blink-12")
+        ));
+        assert!(!matches_selector(
+            Some("OpenBlink-1234"),
+            "AA:BB:CC:DD:EE:FF",
+            Some("Other")
+        ));
+        assert!(!matches_selector(None, "AA:BB:CC:DD:EE:FF", Some("Blink")));
+    }
+
+    #[test]
+    fn selector_matches_address_case_insensitively() {
+        assert!(matches_selector(
+            None,
+            "AA:BB:CC:DD:EE:FF",
+            Some("aa:bb:cc:dd:ee:ff")
+        ));
+        assert!(!matches_selector(
+            None,
+            "AA:BB:CC:DD:EE:FF",
+            Some("aa:bb:cc:dd:ee:00")
+        ));
+    }
 }

@@ -7,14 +7,14 @@ use indicatif::ProgressBar;
 
 use crate::ble::{manager, protocol};
 
-pub async fn run(device: Option<&str>) -> Result<()> {
+pub async fn run(device: Option<&str>, timeout: Duration) -> Result<()> {
     let adapter = manager::first_adapter().await?;
 
     let spinner = ProgressBar::new_spinner();
     spinner.set_message("Searching for device...");
     spinner.enable_steady_tick(Duration::from_millis(100));
 
-    let peripheral = manager::find_device(&adapter, Duration::from_secs(10), device).await?;
+    let peripheral = manager::find_device(&adapter, timeout, device).await?;
     let conn = manager::Connection::open(peripheral).await?;
     conn.subscribe_console().await?;
     let mut notifications = conn.notifications().await?;

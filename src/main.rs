@@ -3,6 +3,8 @@ mod cli;
 mod commands;
 mod compiler;
 
+use std::time::Duration;
+
 use anyhow::Result;
 use clap::{CommandFactory, FromArgMatches};
 
@@ -31,20 +33,22 @@ fn main() -> Result<()> {
         // All other commands talk to the device over BLE.
         other => {
             let runtime = tokio::runtime::Runtime::new()?;
-            runtime.block_on(run_ble(other))
+            runtime.block_on(run_ble(other, Duration::from_secs(cli.timeout)))
         }
     }
 }
 
-async fn run_ble(command: Command) -> Result<()> {
+async fn run_ble(command: Command, timeout: Duration) -> Result<()> {
     match command {
-        Command::Scan { timeout } => commands::scan::run(timeout).await,
+        Command::Scan => commands::scan::run(timeout).await,
         Command::Blink { file, device, slot } => {
-            commands::blink::run(&file, device.as_deref(), slot).await
+            commands::blink::run(&file, device.as_deref(), slot, timeout).await
         }
-        Command::Console { device } => commands::console::run(device.as_deref()).await,
-        Command::Reset { device, slot } => commands::reset::run(device.as_deref(), slot).await,
-        Command::Reload { device } => commands::reload::run(device.as_deref()).await,
+        Command::Console { device } => commands::console::run(device.as_deref(), timeout).await,
+        Command::Reset { device, slot } => {
+            commands::reset::run(device.as_deref(), slot, timeout).await
+        }
+        Command::Reload { device } => commands::reload::run(device.as_deref(), timeout).await,
         Command::Compile { .. } => unreachable!("compile is handled synchronously"),
     }
 }

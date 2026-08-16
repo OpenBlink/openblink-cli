@@ -15,16 +15,16 @@ pub struct Cli {
     /// Increase logging verbosity (-v info, -vv debug, -vvv trace).
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]
     pub verbose: u8,
+
+    /// Maximum time in seconds to scan for devices.
+    #[arg(long, default_value_t = 10, global = true)]
+    pub timeout: u64,
 }
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Scan for nearby OpenBlink devices.
-    Scan {
-        /// Scan duration in seconds.
-        #[arg(long, default_value_t = 10)]
-        timeout: u64,
-    },
+    Scan,
 
     /// Compile a Ruby file, transfer it to the device, and reLoad in one step.
     Blink {
