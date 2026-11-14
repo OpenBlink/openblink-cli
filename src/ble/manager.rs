@@ -325,9 +325,12 @@ async fn negotiate_mtu(peripheral: &Peripheral, mtu_char: Option<&Characteristic
     // negotiated with this host (`Peripheral::mtu()`). A device can advertise
     // a larger MTU characteristic than the negotiated link supports, which
     // would fragment Data chunks; cap at the negotiated size minus the
-    // 3-byte ATT header. A reported 0 means the platform cannot report it.
+    // 3-byte ATT header. `mtu()` reports the default ATT MTU (23) both when
+    // the real negotiation landed on the default and when the platform
+    // cannot report it at all (e.g. BlueZ older than 5.62), so a 23 answer
+    // is uninformative and must not shrink a larger device-reported value.
     let negotiated = peripheral.mtu() as usize;
-    if negotiated > 3 && negotiated - 3 < effective {
+    if negotiated > 23 && negotiated - 3 < effective {
         effective = negotiated - 3;
     }
     effective
