@@ -13,8 +13,8 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use btleplug::api::{
-    Central, CentralEvent, CharPropFlags, Characteristic, Manager as _, Peripheral as _,
-    ScanFilter, ValueNotification, WriteType,
+    Central, CentralEvent, CentralState, CharPropFlags, Characteristic, Manager as _,
+    Peripheral as _, ScanFilter, ValueNotification, WriteType,
 };
 use btleplug::platform::{Adapter, Manager, Peripheral};
 use futures::future::join_all;
@@ -45,10 +45,17 @@ pub async fn first_adapter() -> Result<Adapter> {
         .adapters()
         .await
         .context("failed to enumerate BLE adapters")?;
-    adapters
+    let adapter = adapters
         .into_iter()
         .next()
-        .ok_or_else(|| anyhow!("no Bluetooth adapter found"))
+        .ok_or_else(|| anyhow!("no Bluetooth adapter found"))?;
+    // Fail fast with a clear reason when the adapter exists but is powered
+    // off; a powered-off adapter would otherwise scan forever and find
+    // nothing. `Unknown` (and platforms that cannot report state) proceed.
+    if matches!(adapter.adapter_state().await, Ok(CentralState::PoweredOff)) {
+        return Err(anyhow!("Bluetooth adapter is powered off"));
+    }
+    Ok(adapter)
 }
 
 async fn is_openblink(peripheral: &Peripheral) -> bool {
@@ -302,18 +309,31 @@ impl Connection {
 /// Negotiates the MTU by reading the MTU characteristic (device ATT MTU minus
 /// 3). Falls back to the default when the read fails or the value is too small.
 async fn negotiate_mtu(peripheral: &Peripheral, mtu_char: Option<&Characteristic>) -> usize {
+    let mut effective = protocol::DEFAULT_MTU;
     if let Some(c) = mtu_char {
         if let Ok(value) = peripheral.read(c).await {
             if value.len() >= 2 {
                 let device_mtu = u16::from_le_bytes([value[0], value[1]]) as usize;
-                let effective = device_mtu.saturating_sub(3);
-                if effective >= protocol::MIN_USABLE_MTU {
-                    return effective;
+                let reported = device_mtu.saturating_sub(3);
+                if reported >= protocol::MIN_USABLE_MTU {
+                    effective = reported;
                 }
             }
         }
     }
-    protocol::DEFAULT_MTU
+    // The usable payload MTU is also bounded by the ATT MTU actually
+    // negotiated with this host (`Peripheral::mtu()`). A device can advertise
+    // a larger MTU characteristic than the negotiated link supports, which
+    // would fragment Data chunks; cap at the negotiated size minus the
+    // 3-byte ATT header. `mtu()` reports the default ATT MTU (23) both when
+    // the real negotiation landed on the default and when the platform
+    // cannot report it at all (e.g. BlueZ older than 5.62), so a 23 answer
+    // is uninformative and must not shrink a larger device-reported value.
+    let negotiated = peripheral.mtu() as usize;
+    if negotiated > 23 && negotiated - 3 < effective {
+        effective = negotiated - 3;
+    }
+    effective
 }
 
 #[cfg(test)]
