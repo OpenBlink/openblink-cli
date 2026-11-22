@@ -142,18 +142,50 @@ mod tests {
     }
 
     #[test]
-    fn compiles_with_no_ext_ops_and_no_optimize() {
-        let options = CompileOptions {
-            no_ext_ops: true,
-            no_optimize: true,
-        };
-        let bytes = compile_ruby(
-            "def f(n)\n  n.times { |i| i * 2 }\nend\nf(300)\n",
+    fn no_ext_ops_rejects_programs_requiring_extended_operands() {
+        // >255 string-pool entries force OP_EXT1/2/3 opcodes in mruby 4.0.
+        let mut src = String::from("a = []\n");
+        for i in 0..300 {
+            src.push_str(&format!("a << \"str{i}\"\n"));
+        }
+        src.push_str("a.size\n");
+
+        compile_ruby(&src, "test.rb", CompileOptions::default()).expect("should compile");
+
+        // mruby reports codegen errors only on stderr, so the FFI shim can
+        // only observe the generic failure here.
+        let err = compile_ruby(
+            &src,
             "test.rb",
-            options,
+            CompileOptions {
+                no_ext_ops: true,
+                ..CompileOptions::default()
+            },
+        );
+        assert!(
+            matches!(err, Err(CompileError::Mruby(_))),
+            "a program needing OP_EXT operands must fail with --no-ext-ops"
+        );
+    }
+
+    #[test]
+    fn no_optimize_changes_emitted_bytecode() {
+        let src = "a = 1\nb = a + 2\nputs b\n";
+        let default =
+            compile_ruby(src, "test.rb", CompileOptions::default()).expect("should compile");
+        let no_opt = compile_ruby(
+            src,
+            "test.rb",
+            CompileOptions {
+                no_optimize: true,
+                ..CompileOptions::default()
+            },
         )
         .expect("should compile");
-        assert!(bytes.starts_with(b"RITE"), "output must be a RITE binary");
+        assert_ne!(
+            default, no_opt,
+            "--no-optimize must change the emitted bytecode"
+        );
     }
 
     #[test]
