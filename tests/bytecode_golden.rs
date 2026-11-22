@@ -18,7 +18,7 @@ use std::process::Command;
 /// mruby version the committed golden was produced with. Bumping the mruby
 /// submodule changes the bytecode, so this guard fails loudly and points at the
 /// regeneration command.
-const EXPECTED_MRUBY_VERSION: &str = "mruby 3.4.0";
+const EXPECTED_MRUBY_VERSION: &str = "mruby 4.0.0";
 
 const REGEN_HINT: &str = "UPDATE_GOLDEN=1 cargo test --test bytecode_golden";
 
@@ -90,14 +90,14 @@ fn mrbc_emits_expected_bytecode() {
 
     // Structural sanity checks give a clearer message than a raw byte diff when
     // the output is grossly malformed. Layout per mruby/dump.h:
-    //   [0..4] "RITE"  [4..8] format version "0300"  [12..16] compiler "MATZ".
+    //   [0..4] "RITE"  [4..8] format version "0400"  [12..16] compiler "MATZ".
     assert!(
         bytes.len() >= 20,
         "output is too small to be a RITE binary ({} bytes)",
         bytes.len()
     );
     assert_eq!(&bytes[0..4], b"RITE", "missing RITE magic");
-    assert_eq!(&bytes[4..8], b"0300", "unexpected RITE format version");
+    assert_eq!(&bytes[4..8], b"0400", "unexpected RITE format version");
     assert_eq!(&bytes[12..16], b"MATZ", "unexpected RITE compiler name");
 
     // Tie the golden to a known mruby version so an intentional submodule bump

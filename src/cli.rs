@@ -36,6 +36,12 @@ pub enum Command {
         /// Program slot to write (1 or 2).
         #[arg(long, default_value_t = 1)]
         slot: u8,
+        /// Disallow OP_EXT1/2/3 extended opcodes (mrbc --no-ext-ops).
+        #[arg(long)]
+        no_ext_ops: bool,
+        /// Disable peephole optimizations (mrbc --no-optimize).
+        #[arg(long)]
+        no_optimize: bool,
     },
 
     /// Compile a Ruby file to .mrb without using BLE.
@@ -45,6 +51,12 @@ pub enum Command {
         /// Output path (defaults to the input file with a .mrb extension).
         #[arg(short, long)]
         output: Option<PathBuf>,
+        /// Disallow OP_EXT1/2/3 extended opcodes (mrbc --no-ext-ops).
+        #[arg(long)]
+        no_ext_ops: bool,
+        /// Disable peephole optimizations (mrbc --no-optimize).
+        #[arg(long)]
+        no_optimize: bool,
     },
 
     /// Connect to a device and stream Console output until Ctrl-C.

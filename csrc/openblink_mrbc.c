@@ -28,7 +28,20 @@ openblink_strdup(const char *s)
 }
 
 /*
+ * Compiler switches accepted by openblink_mrbc_compile, mirroring the
+ * corresponding `mrbc` command-line options introduced in mruby 4.0.
+ */
+#define OPENBLINK_MRBC_NO_EXT_OPS  0x01 /* mrbc --no-ext-ops   */
+#define OPENBLINK_MRBC_NO_OPTIMIZE 0x02 /* mrbc --no-optimize  */
+
+/*
  * Compile Ruby source into RITE bytecode (.mrb) held in memory.
+ *
+ * The local-variable section is always stripped from the dumped bytecode
+ * (equivalent to `mrbc --remove-lv`) to keep the BLE transfer payload small;
+ * mruby/c ignores the section entirely.
+ *
+ * `flags` is a bitmask of OPENBLINK_MRBC_* values (0 for the defaults).
  *
  * Returns 0 on success and sets *out_buf (malloc'd, *out_len bytes).
  * Returns non-zero on failure and sets *err_msg (malloc'd C string) to a
@@ -36,7 +49,7 @@ openblink_strdup(const char *s)
  */
 int
 openblink_mrbc_compile(const char *src, size_t src_len, const char *filename,
-                       uint8_t **out_buf, size_t *out_len, char **err_msg)
+                       uint8_t flags, uint8_t **out_buf, size_t *out_len, char **err_msg)
 {
   *out_buf = NULL;
   *out_len = 0;
@@ -58,6 +71,8 @@ openblink_mrbc_compile(const char *src, size_t src_len, const char *filename,
   }
   c->capture_errors = TRUE;
   c->no_exec = TRUE;
+  c->no_ext_ops = (flags & OPENBLINK_MRBC_NO_EXT_OPS) != 0;
+  c->no_optimize = (flags & OPENBLINK_MRBC_NO_OPTIMIZE) != 0;
   mrb_ccontext_filename(mrb, c, fname);
 
   struct mrb_parser_state *p = mrb_parse_nstring(mrb, src, src_len, c);
@@ -95,7 +110,7 @@ openblink_mrbc_compile(const char *src, size_t src_len, const char *filename,
 
   uint8_t *bin = NULL;
   size_t bin_size = 0;
-  int dump_result = mrb_dump_irep(mrb, proc->body.irep, 0, &bin, &bin_size);
+  int dump_result = mrb_dump_irep(mrb, proc->body.irep, MRB_DUMP_NO_LVAR, &bin, &bin_size);
   if (dump_result != MRB_DUMP_OK || bin == NULL) {
     if (bin) mrb_free(mrb, bin);
     mrb_ccontext_free(mrb, c);
@@ -132,5 +147,5 @@ openblink_mrbc_free(void *ptr)
 const char *
 openblink_mrbc_version(void)
 {
-  return MRUBY_RUBY_ENGINE " " MRUBY_VERSION; /* e.g. "mruby 3.4.0" */
+  return MRUBY_RUBY_ENGINE " " MRUBY_VERSION; /* e.g. "mruby 4.0.0" */
 }

@@ -29,7 +29,19 @@ fn main() -> Result<()> {
 
     match cli.command {
         // `compile` does not need BLE or an async runtime.
-        Command::Compile { file, output } => commands::compile::run(&file, output.as_deref()),
+        Command::Compile {
+            file,
+            output,
+            no_ext_ops,
+            no_optimize,
+        } => commands::compile::run(
+            &file,
+            output.as_deref(),
+            compiler::CompileOptions {
+                no_ext_ops,
+                no_optimize,
+            },
+        ),
         // All other commands talk to the device over BLE.
         other => {
             let runtime = tokio::runtime::Runtime::new()?;
@@ -41,8 +53,24 @@ fn main() -> Result<()> {
 async fn run_ble(command: Command, timeout: Duration) -> Result<()> {
     match command {
         Command::Scan => commands::scan::run(timeout).await,
-        Command::Blink { file, device, slot } => {
-            commands::blink::run(&file, device.as_deref(), slot, timeout).await
+        Command::Blink {
+            file,
+            device,
+            slot,
+            no_ext_ops,
+            no_optimize,
+        } => {
+            commands::blink::run(
+                &file,
+                device.as_deref(),
+                slot,
+                timeout,
+                compiler::CompileOptions {
+                    no_ext_ops,
+                    no_optimize,
+                },
+            )
+            .await
         }
         Command::Console { device } => commands::console::run(device.as_deref(), timeout).await,
         Command::Reset { device, slot } => {

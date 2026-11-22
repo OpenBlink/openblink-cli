@@ -54,7 +54,7 @@ binary on your `PATH`.
 
 **Prerequisites**
 
-- [Rust](https://rustup.rs/) 1.83 or newer
+- [Rust](https://rustup.rs/) 1.100 or newer
 - A C compiler — Xcode Command Line Tools (macOS), MSVC Build Tools (Windows),
   or `gcc`/`clang` (Linux)
 - Ruby — used to run mruby's `minirake` during the build
@@ -111,7 +111,7 @@ usually connect in well under a second.
 ### `blink`
 
 ```sh
-openblink blink <file.rb> [--device <name|address>] [--slot <1|2>]
+openblink blink <file.rb> [--device <name|address>] [--slot <1|2>] [--no-ext-ops] [--no-optimize]
 ```
 
 Compiles `<file.rb>`, transfers the bytecode in MTU-sized chunks, sends the
@@ -121,11 +121,18 @@ is `1`.
 ### `compile`
 
 ```sh
-openblink compile <file.rb> [--output <path.mrb>]
+openblink compile <file.rb> [--output <path.mrb>] [--no-ext-ops] [--no-optimize]
 ```
 
 Writes RITE bytecode. When `--output` is omitted, the input path is reused with
 a `.mrb` extension. This command does not use Bluetooth.
+
+The vendored mruby 4.0 compiler always strips the local-variable section
+(equivalent to `mrbc --remove-lv`) to keep the payload small, and emits
+RITE0400 bytecode — devices must run mruby/c 4.0.x built with
+`MRBC_SUPPORT_OP_EXT`. Pass `--no-ext-ops` to forbid OP_EXT1/2/3 extended
+opcodes for firmware built without it, or `--no-optimize` to disable peephole
+optimizations when diagnosing codegen issues.
 
 ### `console`
 

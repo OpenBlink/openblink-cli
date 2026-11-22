@@ -3,14 +3,14 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
-use crate::compiler;
+use crate::compiler::{self, CompileOptions};
 
-pub fn run(file: &Path, output: Option<&Path>) -> Result<()> {
+pub fn run(file: &Path, output: Option<&Path>, options: CompileOptions) -> Result<()> {
     let source =
         fs::read_to_string(file).with_context(|| format!("failed to read {}", file.display()))?;
     let filename = file.to_string_lossy();
 
-    let bytecode = compiler::compile_ruby(&source, &filename)
+    let bytecode = compiler::compile_ruby(&source, &filename, options)
         .with_context(|| format!("failed to compile {}", file.display()))?;
 
     let out_path = match output {

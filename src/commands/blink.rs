@@ -7,14 +7,20 @@ use futures::StreamExt;
 use indicatif::ProgressBar;
 
 use crate::ble::{manager, protocol, transfer};
-use crate::compiler;
+use crate::compiler::{self, CompileOptions};
 
-pub async fn run(file: &Path, device: Option<&str>, slot: u8, timeout: Duration) -> Result<()> {
+pub async fn run(
+    file: &Path,
+    device: Option<&str>,
+    slot: u8,
+    timeout: Duration,
+    options: CompileOptions,
+) -> Result<()> {
     // 1. Compile the Ruby source to bytecode.
     let source =
         fs::read_to_string(file).with_context(|| format!("failed to read {}", file.display()))?;
     let t0 = Instant::now();
-    let bytecode = compiler::compile_ruby(&source, &file.to_string_lossy())
+    let bytecode = compiler::compile_ruby(&source, &file.to_string_lossy(), options)
         .with_context(|| format!("failed to compile {}", file.display()))?;
     println!(
         "Compiled {} ({} bytes) in {} ms",

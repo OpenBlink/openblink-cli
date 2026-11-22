@@ -2,7 +2,7 @@
 name = "openblink-cli"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.83"
+rust-version = "1.100"
 description = "Command-line Build & Blink tool for OpenBlink devices over BLE"
 license = "BSD-3-Clause"
 repository = "https://github.com/OpenBlink/openblink-cli"
