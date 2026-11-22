@@ -5,8 +5,10 @@
 #   - mruby core (includes the bytecode dumper, `mrb_dump_irep`)
 #   - mruby-compiler (parser + code generator)
 #
-# Presym is disabled so that the C shim can be compiled against the public
-# headers in `vendor/mruby/include` alone (no generated `presym/id.h`).
+# Presym is always enabled since mruby 4.0 (`MRB_NO_PRESYM` and
+# `conf.disable_presym` were removed). The generated `mruby/presym/*.h`
+# headers land under `MRUBY_BUILD_DIR/host/include`; `build.rs` adds that
+# directory to the C shim's include path.
 # `MRUBY_BUILD_DIR` is supplied by `build.rs` so artifacts land in Cargo's
 # `OUT_DIR` instead of polluting the submodule working tree.
 MRuby::Build.new('host') do |conf|
@@ -21,6 +23,4 @@ MRuby::Build.new('host') do |conf|
 
   # Only the compiler is needed; keep the dependency/license surface minimal.
   conf.gem core: 'mruby-compiler'
-
-  conf.disable_presym
 end

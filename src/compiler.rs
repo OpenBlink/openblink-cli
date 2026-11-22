@@ -15,6 +15,7 @@ extern "C" {
         src: *const c_char,
         src_len: usize,
         filename: *const c_char,
+        flags: u8,
         out_buf: *mut *mut u8,
         out_len: *mut usize,
         err_msg: *mut *mut c_char,
@@ -23,7 +24,38 @@ extern "C" {
     fn openblink_mrbc_version() -> *const c_char;
 }
 
-/// Returns the version of the statically linked mruby compiler, e.g. `mruby 3.4.0`.
+const OPENBLINK_MRBC_NO_EXT_OPS: u8 = 0x01;
+const OPENBLINK_MRBC_NO_OPTIMIZE: u8 = 0x02;
+
+/// Optional mruby compiler switches, mirroring `mrbc` flags added in mruby 4.0.
+///
+/// The local-variable section is always stripped from the output (equivalent
+/// to `mrbc --remove-lv`) since mruby/c ignores it and it only inflates the
+/// BLE transfer payload.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CompileOptions {
+    /// Disallow OP_EXT1/2/3 extended opcodes (`mrbc --no-ext-ops`). Use for
+    /// firmware whose mruby/c was built without `MRBC_SUPPORT_OP_EXT`.
+    pub no_ext_ops: bool,
+    /// Disable peephole optimizations (`mrbc --no-optimize`), mainly useful
+    /// for diagnosing codegen issues.
+    pub no_optimize: bool,
+}
+
+impl CompileOptions {
+    fn flags(self) -> u8 {
+        let mut flags = 0;
+        if self.no_ext_ops {
+            flags |= OPENBLINK_MRBC_NO_EXT_OPS;
+        }
+        if self.no_optimize {
+            flags |= OPENBLINK_MRBC_NO_OPTIMIZE;
+        }
+        flags
+    }
+}
+
+/// Returns the version of the statically linked mruby compiler, e.g. `mruby 4.0.0`.
 pub fn mrbc_version() -> String {
     // SAFETY: the shim returns a pointer to a static, NUL-terminated string.
     unsafe {
@@ -39,7 +71,11 @@ pub fn mrbc_version() -> String {
 /// Compiles Ruby `source` into RITE bytecode (`.mrb`).
 ///
 /// `filename` is only used to render `file:line:col: message` diagnostics.
-pub fn compile_ruby(source: &str, filename: &str) -> Result<Vec<u8>, CompileError> {
+pub fn compile_ruby(
+    source: &str,
+    filename: &str,
+    options: CompileOptions,
+) -> Result<Vec<u8>, CompileError> {
     if source.trim().is_empty() {
         return Err(CompileError::EmptyInput);
     }
@@ -58,6 +94,7 @@ pub fn compile_ruby(source: &str, filename: &str) -> Result<Vec<u8>, CompileErro
             source.as_ptr() as *const c_char,
             source.len(),
             c_filename.as_ptr(),
+            options.flags(),
             &mut out_buf,
             &mut out_len,
             &mut err_msg,
@@ -98,22 +135,38 @@ mod tests {
 
     #[test]
     fn compiles_valid_program() {
-        let bytes = compile_ruby("1 + 1\n", "test.rb").expect("should compile");
+        let bytes =
+            compile_ruby("1 + 1\n", "test.rb", CompileOptions::default()).expect("should compile");
         assert!(bytes.starts_with(b"RITE"), "output must be a RITE binary");
         assert!(!bytes.is_empty());
     }
 
     #[test]
+    fn compiles_with_no_ext_ops_and_no_optimize() {
+        let options = CompileOptions {
+            no_ext_ops: true,
+            no_optimize: true,
+        };
+        let bytes = compile_ruby(
+            "def f(n)\n  n.times { |i| i * 2 }\nend\nf(300)\n",
+            "test.rb",
+            options,
+        )
+        .expect("should compile");
+        assert!(bytes.starts_with(b"RITE"), "output must be a RITE binary");
+    }
+
+    #[test]
     fn rejects_empty_input() {
         assert!(matches!(
-            compile_ruby("   \n", "test.rb"),
+            compile_ruby("   \n", "test.rb", CompileOptions::default()),
             Err(CompileError::EmptyInput)
         ));
     }
 
     #[test]
     fn reports_syntax_error_with_location() {
-        let err = compile_ruby("def foo\n", "bad.rb").unwrap_err();
+        let err = compile_ruby("def foo\n", "bad.rb", CompileOptions::default()).unwrap_err();
         let msg = err.to_string();
         assert!(
             msg.contains("bad.rb"),
@@ -122,9 +175,9 @@ mod tests {
     }
 
     #[test]
-    fn version_is_mruby_3() {
+    fn version_is_mruby_4() {
         assert!(
-            mrbc_version().starts_with("mruby 3."),
+            mrbc_version().starts_with("mruby 4."),
             "got: {}",
             mrbc_version()
         );

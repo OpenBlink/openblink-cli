@@ -39,6 +39,30 @@ fn main() {
     // Build a static mruby library (compiler + bytecode dumper) into Cargo's
     // OUT_DIR using the vendored `minirake` (only requires a Ruby interpreter).
     let mruby_build_dir = out_dir.join("mruby");
+
+    // The mruby build dir persists in OUT_DIR across builds. minirake only
+    // recompiles objects whose sources changed, so after bumping the vendored
+    // mruby the archive would silently mix objects compiled from two different
+    // mruby versions. Wipe it whenever the vendored source revision changes.
+    let version_header = mruby_root.join("include").join("mruby").join("version.h");
+    let mruby_rev = Command::new("git")
+        .arg("-C")
+        .arg(&mruby_root)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+    let source_stamp = format!(
+        "{mruby_rev}:{}",
+        std::fs::read_to_string(&version_header).unwrap_or_default()
+    );
+    let stamp_file = mruby_build_dir.join(".source-stamp");
+    if std::fs::read_to_string(&stamp_file).ok().as_deref() != Some(source_stamp.as_str()) {
+        let _ = std::fs::remove_dir_all(&mruby_build_dir);
+    }
+
     let ruby = env::var("RUBY").unwrap_or_else(|_| "ruby".to_string());
     let mut command = Command::new(&ruby);
     command
@@ -56,6 +80,9 @@ fn main() {
     if !status.success() {
         panic!("mruby build failed: `{ruby} minirake` exited with {status}");
     }
+
+    std::fs::create_dir_all(&mruby_build_dir).expect("create mruby build dir");
+    std::fs::write(&stamp_file, &source_stamp).expect("write mruby source stamp");
 
     // The MSVC toolchain emits `libmruby.lib`; every other toolchain emits
     // `libmruby.a`.
@@ -85,12 +112,13 @@ fn main() {
         });
     }
 
-    // Compile the FFI shim. MRB_NO_PRESYM must match `disable_presym` in the
-    // build config so the shim and libmruby share the same ABI.
+    // Compile the FFI shim. Since mruby 4.0 presym is always enabled, so the
+    // shim must see the generated `mruby/presym/*.h` headers that minirake
+    // writes into the build dir's include/.
     cc::Build::new()
         .file(&shim)
         .include(mruby_root.join("include"))
-        .define("MRB_NO_PRESYM", None)
+        .include(mruby_build_dir.join("host").join("include"))
         .warnings(false)
         .compile("openblink_mrbc");
 
