@@ -54,7 +54,7 @@ binary on your `PATH`.
 
 **Prerequisites**
 
-- [Rust](https://rustup.rs/) 1.83 or newer
+- [Rust](https://rustup.rs/) 1.100 or newer
 - A C compiler — Xcode Command Line Tools (macOS), MSVC Build Tools (Windows),
   or `gcc`/`clang` (Linux)
 - Ruby — used to run mruby's `minirake` during the build
