@@ -22,13 +22,16 @@ jobs:
     name: Check (fmt + clippy + test)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
-      - uses: dtolnay/rust-toolchain@stable
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          lookup-only: true
       - name: Install BLE build dependencies
         run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
       - name: rustfmt
@@ -58,19 +61,22 @@ jobs:
           - { os: windows-2025, target: x86_64-pc-windows-msvc, msvc_arch: amd64 }
           - { os: windows-11-arm, target: aarch64-pc-windows-msvc, msvc_arch: arm64 }
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
-      - uses: dtolnay/rust-toolchain@stable
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          lookup-only: true
       # mruby's Rake build invokes the MSVC compiler (cl.exe) directly, which is
       # not on PATH by default on the Windows runners. Load the Visual C++
       # developer environment so the native toolchain matches the Rust target.
       - name: Set up MSVC developer environment (Windows)
         if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: TheMrMilchmann/setup-msvc-dev@b01428496a7be6ea8716337c299ffccc9fadc0c8 # v4.1.1
         with:
           arch: ${{ matrix.msvc_arch }}
       - name: Install BLE build dependencies (Linux)
@@ -124,7 +130,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload release artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: openblink-cli-${{ matrix.target }}
           path: ${{ env.ASSET }}
@@ -141,9 +147,11 @@ jobs:
     environment: production
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - name: Download release artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist
           merge-multiple: true
@@ -154,8 +162,13 @@ jobs:
           cat checksums-sha256.txt
       - name: List release files
         run: ls -la dist
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
+        # zizmor: ignore[superfluous-actions] keeps gh-release for generated notes + file upload UX
         with:
           draft: true
           generate_release_notes: true
@@ -165,9 +178,11 @@ jobs:
             dist/checksums-sha256.txt
       - name: Release summary
         if: always()
+        env:
+          RELEASE_NAME: ${{ github.ref_name }}
         run: |
           {
-            echo "## Release ${{ github.ref_name }}"
+            echo "## Release ${RELEASE_NAME}"
             echo ""
             echo "### SHA-256 Checksums"
             echo '```'
