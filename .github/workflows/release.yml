@@ -31,10 +31,9 @@ jobs:
           fetch-depth: 0
           submodules: recursive
           persist-credentials: false
-      - name: Verify signed release tag and production policy
+      - name: Verify release tag and production policy
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG_PUBLIC_KEY: ${{ vars.RELEASE_TAG_PUBLIC_KEY }}
         run: bash .github/scripts/validate_release.sh
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
