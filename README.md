@@ -195,8 +195,7 @@ cargo fmt --all       # format
 cargo clippy --all-targets -- -D warnings
 ```
 
-CI builds and tests on native runners for all six target platforms; releases
-are published automatically when a `v*` tag is pushed.
+CI builds and tests on native runners for all six target platforms.
 
 Each release build also compiles a fixed Ruby program and compares the bytecode
 against a committed golden (`tests/fixtures/bytecode_golden.mrb`) to catch build
@@ -206,6 +205,23 @@ updating the mruby submodule, regenerate the golden and commit it:
 ```sh
 UPDATE_GOLDEN=1 cargo test --test bytecode_golden
 ```
+
+### Publishing a release
+
+Once the release commit is on `main` and its CI is green, push an unsigned
+`v*` tag matching the Cargo package version. GitHub Actions verifies the tag
+and builds the release archives before requesting approval. The `production`
+environment must have required reviewers, administrator bypass disabled, and
+only the `v*` deployment tag policy. After approval, the workflow rechecks the
+policy and automatically publishes the GitHub Release with SHA-256 checksums
+and build provenance. If a Release already exists for the tag, the workflow
+stops without changing it.
+
+If the GitHub Release for the tag is still a draft, delete the draft even if
+it already contains some assets. Keep the Git tag and use **Re-run failed jobs**.
+If the Release is already published, do not modify it or rerun the failed
+publication job. Verify the release assets and any published checksums. If
+the Release is broken, publish a new patch version.
 
 ## Platform notes
 

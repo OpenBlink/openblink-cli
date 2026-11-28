@@ -6,9 +6,11 @@ fail() {
   exit 1
 }
 
-if [[ "${1:-}" != --environment-only ]]; then
+if [[ "${1:-}" != --publish-check ]]; then
   [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF" == refs/tags/v* ]] ||
     fail "Expected a v* tag push"
+  jq -es 'length == 1 and .[0].deleted == false' "$GITHUB_EVENT_PATH" >/dev/null ||
+    fail "Expected a non-deletion tag push"
   [[ "$GITHUB_REF" == "refs/tags/$GITHUB_REF_NAME" ]] || fail "Tag name does not match the ref"
   if [[ "$(git cat-file -t "$GITHUB_REF")" == tag ]]; then
     tag_name=$(git cat-file tag "$GITHUB_REF" | sed -n '3s/^tag //p')
@@ -35,3 +37,11 @@ gh api --paginate --slurp "$endpoint/deployment-branch-policies?per_page=100" | 
   all(.[]; .branch_policies | type == "array") and
   ([.[].branch_policies[] | {type, name}] == [{type: "tag", name: "v*"}])
 ' >/dev/null || fail "production must allow only the v* tag policy"
+
+if [[ "${1:-}" == --publish-check ]]; then
+  gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" | jq -e --arg tag "$GITHUB_REF_NAME" '
+    length > 0 and
+    all(.[]; type == "array") and
+    all(.[][]; (.tag_name | type == "string") and .tag_name != $tag)
+  ' >/dev/null || fail "Cannot confirm there is no existing Release for $GITHUB_REF_NAME"
+fi
