@@ -174,10 +174,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Recheck production policy
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash .github/scripts/validate_release.sh --environment-only
       - name: Download release artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -190,36 +186,18 @@ jobs:
           cat checksums-sha256.txt
       - name: List release files
         run: ls -la dist
+      - name: Recheck production policy and release availability
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/validate_release.sh --publish-check
       - name: Attest build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/*
-      - name: Create or update draft GitHub Release
+      - name: Publish a new GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          assets=(dist/openblink-cli-*.tar.gz dist/openblink-cli-*.zip dist/checksums-sha256.txt)
-          releases=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100")
-          state=$(jq -er --arg tag "$GITHUB_REF_NAME" '
-            [.[][] | select(.tag_name == $tag)]
-            | if length == 0 then "missing"
-              elif length == 1 and .[0].draft == true then "draft"
-              else "blocked"
-              end
-          ' <<< "$releases")
-          case "$state" in
-            missing)
-              gh release create "$GITHUB_REF_NAME" --verify-tag --draft --generate-notes "${assets[@]}"
-              ;;
-            draft)
-              gh release upload "$GITHUB_REF_NAME" --clobber "${assets[@]}"
-              ;;
-            *)
-              echo "::error::Refusing to modify a published or ambiguous release for $GITHUB_REF_NAME"
-              exit 1
-              ;;
-          esac
+        run: bash .github/scripts/publish_release.sh
       - name: Release summary
         if: always()
         env:
