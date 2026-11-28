@@ -1,6 +1,6 @@
 [package]
 name = "openblink-cli"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 rust-version = "1.100"
 description = "Command-line Build & Blink tool for OpenBlink devices over BLE"
