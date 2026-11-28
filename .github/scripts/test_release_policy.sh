@@ -2,6 +2,7 @@
 set -euo pipefail
 
 validator=$(realpath "$(dirname "$0")/validate_release.sh")
+publisher=$(realpath "$(dirname "$0")/publish_release.sh")
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 cd "$tmp"
@@ -18,6 +19,10 @@ git -c tag.gpgSign=false tag v1.2.3
 
 gh() {
   local arg response paginate=false slurp=false
+  if [[ "$1" == release && "$2" == create ]]; then
+    printf '%s\n' "$@"
+    return
+  fi
   case "$*" in
     *deployment-branch-policies*) response=$POLICIES ;;
     *'/releases?'*)
@@ -83,4 +88,23 @@ RELEASES='[[{"tag_name":"v1.2.3","draft":true}]]' \
 RELEASES='api-error' reject 'no existing Release' bash "$validator" --publish-check
 RELEASES='[]' reject 'no existing Release' bash "$validator" --publish-check
 RELEASES='[{"unexpected":[]}]' reject 'no existing Release' bash "$validator" --publish-check
+
+mkdir dist
+touch dist/openblink-cli-linux.tar.gz dist/openblink-cli-windows.zip dist/checksums-sha256.txt
+check_publish() {
+  local tag=$1 actual expected
+  shift
+  actual=$(GITHUB_REF_NAME="$tag" bash "$publisher")
+  expected=$(printf '%s\n' release create "$tag" --verify-tag --generate-notes "$@" \
+    dist/openblink-cli-linux.tar.gz dist/openblink-cli-windows.zip dist/checksums-sha256.txt)
+  if [[ "$actual" != "$expected" ]]; then
+    printf 'Unexpected release command for %s:\n%s\n' "$tag" "$actual" >&2
+    exit 1
+  fi
+}
+
+check_publish v1.2.3
+check_publish v1.2.3+build-linux
+check_publish v1.2.3-rc.1 --prerelease --latest=false
+check_publish v1.2.3-rc.1+build-linux --prerelease --latest=false
 printf 'Release policy tests passed.\n'

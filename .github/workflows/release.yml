@@ -197,10 +197,7 @@ jobs:
       - name: Publish a new GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          assets=(dist/openblink-cli-*.tar.gz dist/openblink-cli-*.zip dist/checksums-sha256.txt)
-          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes "${assets[@]}"
+        run: bash .github/scripts/publish_release.sh
       - name: Release summary
         if: always()
         env:

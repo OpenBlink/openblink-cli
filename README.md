@@ -215,7 +215,8 @@ environment must have required reviewers, administrator bypass disabled, and
 only the `v*` deployment tag policy. After approval, the workflow rechecks the
 policy and automatically publishes the GitHub Release with SHA-256 checksums
 and build provenance. If a Release already exists for the tag, the workflow
-stops without changing it.
+stops without changing it. A prerelease version (for example, `v1.2.3-rc.1`)
+is marked as a pre-release, not as the latest release.
 
 If the GitHub Release for the tag is still a draft, delete the draft even if
 it already contains some assets. Keep the Git tag and use **Re-run failed jobs**.
